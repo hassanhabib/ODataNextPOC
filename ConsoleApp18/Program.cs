@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
+using Microsoft.AspNetCore.OData.Query;
 using Microsoft.AspNetCore.OData.Query.Expressions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OData.Edm;
@@ -39,9 +41,10 @@ namespace ConsoleApp18
             //var productDetailEntitySet = container.AddEntitySet("ProductDetails", productDetailsEntityType);
             //productEntitySet.AddNavigationTarget(productDetail, productDetailEntitySet);
 
-            Uri requestUri = new Uri("Products?$select=ID&$expand=ProductDetail&$filter=ID eq 2", UriKind.Relative);
+            Uri requestUri = new Uri("Products?$select=ID&$expand=ProductDetail&$filter=Name eq 'Sam'", UriKind.Relative);
 
             ODataUriParser parser = new ODataUriParser(model, serviceRoot, requestUri);
+            ODataPath odataPath = parser.ParsePath();
             SelectExpandClause expand = parser.ParseSelectAndExpand(); // parse $select, $expand
             FilterClause filter = parser.ParseFilter();                // parse $filter
             OrderByClause orderby = parser.ParseOrderBy();             // parse $orderby
@@ -51,12 +54,52 @@ namespace ConsoleApp18
             bool? count = parser.ParseCount();                         // parse $count
             IQueryable<Product> products = new List<Product>().AsQueryable();
             IServiceCollection collection = new ServiceCollection();
+            collection.AddScoped<ODataQuerySettings>();
+            collection.AddSingleton(sp => model);
             var serviceProvider = collection.BuildServiceProvider();
             FilterBinder filterBinder = new FilterBinder(serviceProvider);
-            Expression exp = filterBinder.Bind(filter.Expression);
-            var query = products.Where(ex => ex.ID == 2);
-            Console.WriteLine("");
 
+            MethodInfo bindMethodInfo = typeof(FilterBinder)
+                .GetMethod("Bind", BindingFlags.NonPublic | BindingFlags.Static,
+                new Type[] { 
+                    typeof(IQueryable), 
+                    typeof(FilterClause),
+                    typeof(Type),
+                    typeof(ODataQueryContext),
+                    typeof(ODataQuerySettings)
+                });
+
+
+
+            var odataQueryContext = new ODataQueryContext(model, typeof(Product), odataPath);
+
+            var expression = bindMethodInfo.Invoke(null, 
+                new object[] { products, filter, typeof(Product), odataQueryContext, new ODataQuerySettings() });
+
+            Expression exp = (Expression)expression;
+
+            var productList = new List<Product>()
+            {
+                new Product
+                {
+                    Name = "Hassan"
+                },
+                new Product
+                {
+                    Name = "Sam"
+                }
+            };
+
+            var results = Where(productList.AsQueryable(), exp, typeof(Product));
+
+            var samProduct = results.Cast<Product>().FirstOrDefault();
+
+            Console.WriteLine(results.Cast<Product>().Count());
+
+
+            // INPUT: OData Query
+            // Converting to Expression/LINQ
+            // OUTPUT: OData Query
 
             /*
              * "?$select=Id, Name".AsIQueryable();
@@ -65,9 +108,34 @@ namespace ConsoleApp18
              */
         }
 
+        public static IQueryable Where(IQueryable query, Expression where, Type type)
+        {
+            MethodInfo whereMethod = GenericMethodOf(_ => Queryable.Where<int>(
+                default(IQueryable<int>), default(Expression<Func<int, bool>>)));
+
+            whereMethod = whereMethod.MakeGenericMethod(type);
+        //MethodInfo whereMethod = ExpressionHelperMethods.QueryableWhereGeneric.MakeGenericMethod(type);
+            return whereMethod.Invoke(null, new object[] { query, where }) as IQueryable;
+        }
+
+        private static MethodInfo GenericMethodOf<TReturn>(Expression<Func<object, TReturn>> expression)
+        {
+            return GenericMethodOf(expression as Expression);
+        }
+
+
+
+        private static MethodInfo GenericMethodOf(Expression expression)
+        {
+            LambdaExpression lambdaExpression = expression as LambdaExpression;
+
+            return (lambdaExpression.Body as MethodCallExpression).Method.GetGenericMethodDefinition();
+        }
+
         public class Product
         {
             public int ID { get; set; }
+            public string Name { get; set; }
             public ProductDetail ProductDetail { get; set; }
         }
 

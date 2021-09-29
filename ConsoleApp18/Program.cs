@@ -14,7 +14,63 @@ namespace ConsoleApp18
 {
     class Program
     {
+        public static string ExpressionVisitor(Expression expression)
+        {
+            if(expression.NodeType == ExpressionType.Call)
+            {
+                MethodCallExpression constantExp =
+                    (MethodCallExpression)expression;
+            }
+
+            if (expression.NodeType == ExpressionType.Lambda)
+            {
+                LambdaExpression lambdaExpression =
+                    (LambdaExpression)expression;
+
+                BinaryExpression binaryExpression =
+                    (BinaryExpression)lambdaExpression.Body;
+
+                MemberExpression leftMemberExpression =
+                    (MemberExpression) binaryExpression.Left;
+
+                PropertyInfo leftMemberPropertyInfo =
+                    (PropertyInfo)leftMemberExpression.Member;
+
+                // first
+                string leftMemberName =
+                    leftMemberPropertyInfo.Name;
+
+                string method =
+                    binaryExpression.NodeType == ExpressionType.Equal 
+                    ? " eq "
+                    : "unknown";
+
+                ConstantExpression rightMemberExpression =
+                    (ConstantExpression)binaryExpression.Right;
+
+                string rightMember =
+                    $"'{rightMemberExpression.Value.ToString()}'";
+
+                return $"{leftMemberName}{method}{rightMember}";
+            }
+
+            return default;
+        }
+
         static void Main(string[] args)
+        {
+            IQueryable<Product> queryableProducts =
+                new List<Product>().AsQueryable();
+
+            IQueryable<Product> productsNamedSam =
+                queryableProducts.Where(p => p.Name == "Sam").AsQueryable();
+
+            string odataQuery = ExpressionVisitor(productsNamedSam.Expression);
+
+            Console.WriteLine(odataQuery);
+        }
+
+        public void ODataToExpression()
         {
             Uri serviceRoot = new Uri("https://localhost");
             ODataConventionModelBuilder builder = new ODataConventionModelBuilder();
@@ -41,7 +97,9 @@ namespace ConsoleApp18
             //var productDetailEntitySet = container.AddEntitySet("ProductDetails", productDetailsEntityType);
             //productEntitySet.AddNavigationTarget(productDetail, productDetailEntitySet);
 
-            Uri requestUri = new Uri("Products?$select=ID&$expand=ProductDetail&$filter=Name eq 'Sam'", UriKind.Relative);
+            // QUERY -> EXP
+
+            Uri requestUri = new Uri("Products?$select=ID&$expand=ProductDetail&$filter=Name eq 'Hassan'", UriKind.Relative);
 
             ODataUriParser parser = new ODataUriParser(model, serviceRoot, requestUri);
             ODataPath odataPath = parser.ParsePath();
@@ -61,25 +119,27 @@ namespace ConsoleApp18
 
             MethodInfo bindMethodInfo = typeof(FilterBinder)
                 .GetMethod("Bind", BindingFlags.NonPublic | BindingFlags.Static,
-                new Type[] { 
-                    typeof(IQueryable), 
+                new Type[] {
+                    typeof(IQueryable),
                     typeof(FilterClause),
                     typeof(Type),
                     typeof(ODataQueryContext),
                     typeof(ODataQuerySettings)
                 });
 
-
-
             var odataQueryContext = new ODataQueryContext(model, typeof(Product), odataPath);
 
-            var expression = bindMethodInfo.Invoke(null, 
+            var expression = bindMethodInfo.Invoke(null,
                 new object[] { products, filter, typeof(Product), odataQueryContext, new ODataQuerySettings() });
 
             Expression exp = (Expression)expression;
 
             var productList = new List<Product>()
             {
+                new Product
+                {
+                    Name = "Hassan"
+                },
                 new Product
                 {
                     Name = "Hassan"
@@ -95,6 +155,21 @@ namespace ConsoleApp18
             var samProduct = results.Cast<Product>().FirstOrDefault();
 
             Console.WriteLine(results.Cast<Product>().Count());
+
+
+            /// EXP -> QUERY
+            IQueryable<Product> hassanProducts =
+                productList.Where(p => p.Name == "Hassan").AsQueryable();
+
+            var odataQueryBuilder = new ODataXQueryBuilder();
+
+            string query = odataQueryBuilder.AsODataQuery(hassanProducts);
+
+            // $filter=Name eq 'Hassan'
+
+
+
+
 
 
             // INPUT: OData Query
